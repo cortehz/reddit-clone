@@ -9,6 +9,10 @@ import { buildSchema } from "type-graphql";
 import { HelloResolver } from "./resolvers/hello";
 import { PostResolver } from "./resolvers/post";
 import { UserResolver } from "./resolvers/user";
+import redis from "redis";
+import session from "express-session";
+import connectRedis from "connect-redis";
+import { MyContext } from "./types";
 
 // top level await for promise
 const main = async () => {
@@ -19,18 +23,50 @@ const main = async () => {
 
   const app = express();
 
+  const RedisStore = connectRedis(session);
+  const redisClient = redis.createClient();
+
+  redisClient.on("error", function (err) {
+    console.log("Error " + err);
+  });
+
+  // arrgement matters, need to come before middleware
+  app.use(
+    //sessions for auth using redis
+    session({
+      name: "qid",
+      store: new RedisStore({
+        client: redisClient,
+        disableTouch: true,
+        host: "localhost",
+        port: 6379,
+      }),
+      cookie: {
+        maxAge: 1000 * 60 * 60 * 24 * 365 * 10, //10years
+        httpOnly: true, //cookie cant be accessed in our front end
+        secure: _prod_, // cookie only works in https
+        sameSite: "lax", //csrfnpm
+      },
+      saveUninitialized: false,
+      secret: "lkjkhkhkkhkhkhkhklohoihlholihoih",
+      resave: false,
+    })
+  );
+
   const apolloServer = new ApolloServer({
     schema: await buildSchema({
       resolvers: [HelloResolver, PostResolver, UserResolver],
       validate: false,
     }),
 
-    context: () => ({ em: orm.em }), //   used/accessible by all resolvers
+    context: ({ req, res }): MyContext => ({ em: orm.em, req, res }), //   used/accessible by all resolvers
   });
 
   apolloServer.applyMiddleware({ app }); //create graphql endpoint on express
 
   app.listen(3000, () => console.log("server started on port 3000"));
+
+  console.log(_prod_);
 
   //   create post table
   //   const post = orm.em.create(Post, { title: "my first post" });
